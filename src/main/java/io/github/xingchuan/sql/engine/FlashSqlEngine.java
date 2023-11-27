@@ -1,15 +1,21 @@
 package io.github.xingchuan.sql.engine;
 
+import cn.hutool.core.date.DatePattern;
+import cn.hutool.core.date.DateUnit;
+import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.io.IoUtil;
 import cn.hutool.core.io.resource.ResourceUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
+import io.github.xingchuan.sql.exception.FlashSqlEngineException;
 import io.github.xingchuan.sql.provider.SqlParseProvider;
 import io.github.xingchuan.sql.xml.XmlDocumentParser;
+import org.apache.commons.io.FilenameUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -17,8 +23,11 @@ import javax.xml.parsers.ParserConfigurationException;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.HashMap;
-import java.util.Map;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.*;
 
 import static io.github.xingchuan.sql.provider.impl.DefaultMybatisSqlParseProvider.MYBATIS_SQL_TYPE;
 
@@ -31,7 +40,7 @@ import static io.github.xingchuan.sql.provider.impl.DefaultMybatisSqlParseProvid
  */
 public class FlashSqlEngine {
 
-    private Logger logger = LoggerFactory.getLogger(FlashSqlEngine.class);
+    private final Logger logger = LoggerFactory.getLogger(FlashSqlEngine.class);
 
     /**
      * 从配置文件读出来的sqlId映射，key -> sqlId value -> sql模板内容
@@ -58,20 +67,28 @@ public class FlashSqlEngine {
     /**
      * 根据configFilePath，初始化内容
      *
-     * @param configFilePath 待加载的资源位置
-     * @throws IOException
+     * @param configFilePath 待加载的资源位置，必须在mapper目录下，文件格式为xml，支持通配符*，例如 mapper/aa/*.xml,mapper/**\/*.xml
+     * @throws IOException IO异常
      */
     public void loadConfig(String configFilePath) throws IOException {
-        try (InputStream inputStream = loadConfigSourceStream(configFilePath)) {
-            Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(inputStream);
-            sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "select"));
-            sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "update"));
-            sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "insert"));
-            sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "delete"));
-        } catch (ParserConfigurationException | SAXException e) {
-            throw new RuntimeException(e);
+        Date startDate = DateUtil.date();
+        List<Path> xmlFiles = getFilesInDirectory(configFilePath);
+        for (Path path : xmlFiles) {
+            try (InputStream inputStream = loadConfigSourceStream(path.toAbsolutePath().toString())) {
+                Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(inputStream);
+                // 获取namespace
+                Element mapperElement = (Element) document.getElementsByTagName("mapper").item(0);
+                String namespace = mapperElement.getAttribute("namespace");
+                sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "select", namespace, sqlIdMap));
+                sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "update", namespace, sqlIdMap));
+                sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "insert", namespace, sqlIdMap));
+                sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "delete", namespace, sqlIdMap));
+            } catch (ParserConfigurationException | SAXException e) {
+                throw new FlashSqlEngineException(e.getMessage());
+            }
         }
-
+        Date endDate = DateUtil.date();
+        logger.info("{} sql template loading completed, the loading lasted {} seconds, a total of {} files, {} templates.", DateUtil.format(endDate, DatePattern.NORM_DATETIME_PATTERN), DateUtil.between(startDate, endDate, DateUnit.SECOND), xmlFiles.size(), sqlIdMap.size());
     }
 
 
@@ -83,6 +100,10 @@ public class FlashSqlEngine {
      * @since 1.0.1
      */
     public void saveSqlTemplate(String sqlId, String template) {
+        if (sqlIdMap.containsKey(sqlId)) {
+            logger.error("sqlId {} already exists. ", sqlId);
+            throw new FlashSqlEngineException("sqlId " + sqlId + " already exists. ");
+        }
         this.sqlIdMap.put(sqlId, template);
         logger.info("sqlId {} added. ", sqlId);
     }
@@ -159,5 +180,37 @@ public class FlashSqlEngine {
             return ResourceUtil.getStream(configFilePath);
         }
         return IoUtil.toStream(FileUtil.readBytes(configFile));
+    }
+
+    /**
+     * 获取加载文件
+     *
+     * @param mapperLocations 加载文件路径
+     * @return 待加载文件路径
+     */
+    private List<Path> getFilesInDirectory(String mapperLocations) {
+        // 默认场合加载mapper/iotdb/路径下的xml文件
+        String directoryPath = "mapper/iotdb/";
+        String filePattern = "*.xml";
+        if (StrUtil.isNotEmpty(mapperLocations)) {
+            int index1 = StrUtil.indexOf(mapperLocations, "mapper", 0, true);
+            int index2 = StrUtil.indexOf(mapperLocations, '*');
+            directoryPath = StrUtil.sub(mapperLocations, index1, index2);
+        }
+        List<Path> files = new ArrayList<>();
+        ClassLoader classLoader = FileUtil.class.getClassLoader();
+        URL resource = classLoader.getResource(directoryPath);
+        if (resource != null) {
+            try {
+                Path path = Paths.get(resource.toURI());
+                Files.walk(path)
+                        .filter(Files::isRegularFile)
+                        .filter(p -> FilenameUtils.wildcardMatch(p.getFileName().toString(), filePattern))
+                        .forEach(files::add);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        return files;
     }
 }

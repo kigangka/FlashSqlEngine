@@ -1,6 +1,7 @@
 package io.github.xingchuan.sql.xml;
 
 import cn.hutool.core.util.StrUtil;
+import io.github.xingchuan.sql.exception.FlashSqlEngineException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -25,16 +26,17 @@ import java.util.Map;
  */
 public class XmlDocumentParser {
 
-    private static Logger logger = LoggerFactory.getLogger(XmlDocumentParser.class);
+    private static final Logger logger = LoggerFactory.getLogger(XmlDocumentParser.class);
 
     /**
      * 读取xml document指定类型的sql id的map
      *
-     * @param document xml doc对象
-     * @param type     select ? update ? delete? insert?
+     * @param document  xml doc对象
+     * @param type      select ? update ? delete? insert?
+     * @param namespace Map[namespace.sqlId, Template] Guarantee uniqueness
      * @return key: sqlId value: sql Template Content
      */
-    public static Map<String, String> fetchXmlDocumentSql(Document document, String type) {
+    public static Map<String, String> fetchXmlDocumentSql(Document document, String type, String namespace, Map<String, String> sqlIdMap) {
         Map<String, String> resultSqlIdMap = new HashMap<>();
         NodeList nodeList = document.getElementsByTagName(type);
         int length = nodeList.getLength();
@@ -52,9 +54,15 @@ public class XmlDocumentParser {
                 String templateContent = xmlNodeToString(childNode);
                 templateBuilder.append(templateContent);
             }
-            resultSqlIdMap.put(id, templateBuilder.toString());
-            logger.info("sqlId {} loaded to cache.", id);
-
+            String sqlId = namespace + StrUtil.DOT + id;
+            // 判断是否重复
+            if (sqlIdMap.containsKey(sqlId)) {
+                logger.error("Duplicate sqlId: {}", sqlId);
+                throw new FlashSqlEngineException("Duplicate sqlId: " + sqlId);
+            } else {
+                resultSqlIdMap.put(sqlId, templateBuilder.toString());
+            }
+            logger.info("sqlId {} loaded to cache.", sqlId);
         }
         return resultSqlIdMap;
     }
@@ -66,7 +74,7 @@ public class XmlDocumentParser {
      * @return a xml string from node
      */
     private static String xmlNodeToString(Node node) {
-        Transformer transformer = null;
+        Transformer transformer;
         if (node == null) {
             throw new IllegalArgumentException();
         }
