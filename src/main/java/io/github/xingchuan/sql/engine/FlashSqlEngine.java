@@ -91,6 +91,32 @@ public class FlashSqlEngine {
         logger.info("{} sql template loading completed, the loading lasted {} seconds, a total of {} files, {} templates.", DateUtil.format(endDate, DatePattern.NORM_DATETIME_PATTERN), DateUtil.between(startDate, endDate, DateUnit.SECOND), xmlFiles.size(), sqlIdMap.size());
     }
 
+    /**
+     * 根据configFilePath，初始化内容
+     *
+     * @param inputStream 待加载的资源
+     * @throws IOException IO异常
+     */
+    public void loadConfig(InputStream inputStream) throws IOException {
+        Date startDate = DateUtil.date();
+        try {
+            Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(inputStream);
+            // 获取namespace
+            Element mapperElement = (Element) document.getElementsByTagName("mapper").item(0);
+            String namespace = mapperElement.getAttribute("namespace");
+            sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "select", namespace, sqlIdMap));
+            sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "update", namespace, sqlIdMap));
+            sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "insert", namespace, sqlIdMap));
+            sqlIdMap.putAll(XmlDocumentParser.fetchXmlDocumentSql(document, "delete", namespace, sqlIdMap));
+        } catch (SAXException e) {
+            throw new RuntimeException(e);
+        } catch (ParserConfigurationException e) {
+            throw new RuntimeException(e);
+        }
+        Date endDate = DateUtil.date();
+        logger.info("{} sql template loading completed, the loading lasted {} seconds, {} templates in total.", DateUtil.format(endDate, DatePattern.NORM_DATETIME_PATTERN), DateUtil.between(startDate, endDate, DateUnit.SECOND), sqlIdMap.size());
+    }
+
 
     /**
      * 新增一个sql模板
