@@ -1,3 +1,19 @@
+
+最近学习Iotdb，Springboot环境下 使用Java原生接口，但拼接sql比较麻烦，所以想找了个sql模板拼接，参考引用了[Flash Sql Engine](https://github.com/qianxingchuan/FlashSqlEngine)
+### 使用方法
+>+ 下载源码到本地 https://github.com/kigangka/FlashSqlEngine.git fork版本主要改动了sqlId为全局唯一
+>+ 通过maven打包：mvn clean install 
+>+ pom文件引入
+```
+     
+        <dependency>
+            <groupId>io.github.flash-query</groupId>
+            <artifactId>FlashSqlEngine</artifactId>
+            <version>1.0.2</version>
+        </dependency>
+
+```
+***
 # Flash Sql Engine
 ## Background
 
